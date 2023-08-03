@@ -1,0 +1,158 @@
+---
+title: "Joining census data"
+author: "Dave"
+format: html
+editor: visual
+---
+
+## Libraries
+
+```{r libraries}
+#| output: false
+library(here)
+library(fs)
+
+library(sf)
+library(dplyr)
+library(purrr)
+library(stringr)
+library(lobstr)
+library(vroom)
+```
+
+## Read required data
+
+### Read national statistics
+
+```{r defineStats}
+stats <- c("age", "ethnicity", "ethnicity-harmonised",
+           "general-health", "household-composition", "religion")
+```
+
+```{r readCensus}
+read_census <- function(stat){
+  
+  file_name <- 
+    str_c("republic-of-ireland", stat, "sa", "2016", sep = "_") |> 
+    str_c(".RDS")
+  
+  readRDS(here("census-data", file_name))
+}
+```
+
+```{r getStats}
+names(stats) <- stats
+
+stats <- map(stats, read_census)
+tree(stats, max_depth = 1)
+```
+
+### Read diocesan shapes
+
+```{r readDiocesanShapes}
+#| cache: false
+dioceses <-
+  read_sf(here("geospatial-data", "coi-dioceses-as-small-area-conglomerations.geojson"))
+
+dioceses <- 
+  as.data.frame(dioceses) |> 
+  select(-geometry) |> 
+  filter(diocese %in% c("Cork, Cloyne and Ross",
+                        "Kilmore, Elphin and Ardagh",
+                        "Tuam, Limerick and Killaloe",
+                        "Meath and Kildare"))
+```
+
+## Join stats
+
+```{r joinStats}
+
+stats <-
+  map(stats,
+      \(stat){
+        
+        stat <- 
+          mutate(stat,
+                 area_code = str_remove(sa_2015_code, "SA2017_")) |> 
+                   select(-sa_2015_code)
+        
+        left_join(dioceses, stat, by = "area_code")
+      })
+
+stats[[1]] |> 
+  filter(type == "NI data zone") |> 
+  select(1:4)
+```
+
+## Transform
+
+### All-dioceses table
+
+```{r allDiocesesTable}
+dioceses_tables <- 
+  map(stats,
+      \(x){
+        group_by(x, diocese) |> 
+          summarise(across(where(is.numeric),
+                           \(y) sum(y, na.rm = TRUE)), .groups = "drop")
+      })
+
+dioceses_tables[[1]][1:4]
+```
+
+```{r smallAreas}
+detailed_tables <- 
+  map(stats, 
+      \(x){
+        
+        grouped <- group_by(x, diocese)
+        keys <- group_keys(grouped)[["diocese"]]
+        
+        groups <- group_split(grouped)
+        names(groups) <- keys
+        
+        return(groups)
+      })
+
+detailed_tables$age[["Cork, Cloyne and Ross"]][1:4]
+```
+
+## Save
+
+### Save all-dioceses table
+
+```{r diocesanSummaries}
+save_dir <- dir_create(here("diocesan-stats"))
+
+summaries <- dir_create(save_dir, "diocesan-totals")
+
+iwalk(dioceses_tables, 
+    \(x, x_name){
+      file_name <- 
+        str_c("roi", "dioceses", x_name, "2016", sep = "_") |> 
+        str_c(".csv")
+      
+      vroom_write(x, here(summaries, file_name), delim = ",")
+    })
+```
+
+### Save small-area tables
+
+```{r saveSmallArea}
+diocesan_tables <- dir_create(save_dir, "diocesan-stats-by-civic-area")
+
+iwalk(stats,
+      \(stat_table, stat_name){
+                
+                file_name <- 
+                  str_c("republic-of-ireland", "dioceses",
+                        stat_name, "sa", "2016", sep = "_") |> 
+                  str_c(".csv")
+                
+                vroom_write(
+                  stat_table,
+                  file.path(file_name),
+                  delim = ",")
+                
+        })
+```

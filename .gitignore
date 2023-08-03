@@ -1,0 +1,12 @@
+.Rproj.user
+diocesan-stats/diocesan-stats-by-civic-area
+*.html
+R/*_files
+R/*_cache
+*.xlsx
+/.Rhistory
+.Rhistory
+.Rdata
+.httr-oauth
+.DS_Store
+.quarto

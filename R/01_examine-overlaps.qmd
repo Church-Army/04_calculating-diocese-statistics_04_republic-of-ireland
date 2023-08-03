@@ -1,0 +1,165 @@
+---
+title: "Analysing overlaps"
+author: "Dave"
+format: html
+editor: visual
+---
+
+## Libraries
+
+```{r libraries}
+library(here)
+library(fs)
+
+library(sf)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(purrr)
+library(tidyr)
+
+library(carutools)
+```
+
+## Read in Data
+
+### Read in CoM shapes
+
+```{r readInData}
+com_dirs <- dir_ls(here("geospatial-data", "com-areas"))
+com_names <- str_extract(com_dirs, "(?<=/)[^/]+(?=$)")
+
+names(com_dirs) <- com_names
+
+com_shapes <- map(com_dirs, read_sf)
+```
+
+### Read in diocesan shapes
+
+```{r readInDioceses}
+#| cache: true
+dioceses <- read_sf(
+  here("geospatial-data", "coi-dioceses-as-small-area-conglomerations.geojson"))
+```
+
+### Reproject CoM shapes to diocesan crs
+
+```{r reproject}
+com_shapes <- map(com_shapes, \(x) st_transform(x, st_crs(dioceses)))
+```
+
+And bind_rows
+
+```{r bindRowsCom}
+com <-
+  bind_rows(com_shapes) |> 
+  select(-id, -name, -Region) |> 
+  mutate(com_name = com_names) |> 
+  relocate(com_name) 
+
+rm(com_shapes, com_names, com_dirs)
+```
+
+### Read in census data
+
+Note that these populations are from different times, so this is a bit cheeky.
+
+```{r readCensusData}
+population <- readRDS(here("census-data", "ni-and-roi_small-area-populations.RDS"))
+```
+
+## Plot
+
+### Get overlapping dioceses
+
+```{r plot}
+
+intersections <- st_intersects(com, dioceses, sparse = FALSE)
+
+com <- mutate(com, row_num = row_number())
+com <- rowwise(com)
+
+dioceses <- rename(dioceses, sa_geometry = geometry)
+
+com <- 
+  mutate(
+    com,
+    intersecting_small_areas =
+      list(
+        dioceses[
+          intersections[row_num, ],
+          c("sa_geometry", "area_code", "diocese")
+          ]
+        )) |>
+
+  unnest(intersecting_small_areas) |> 
+  select(-row_num)
+
+ggplot(filter(com, com_name == "ballina")) + 
+  geom_sf(aes(geometry = sa_geometry, fill = diocese, colour = com_name)) +
+  ca_scale_fill_discrete() + 
+  ca_scale_colour_discrete()
+
+ggplot(filter(com, com_name == "cork")) + 
+  geom_sf(aes(geometry = sa_geometry, fill = diocese, colour = com_name)) +
+  ca_scale_fill_discrete() + 
+  ca_scale_colour_discrete()
+```
+
+Okay for the sake of simplicity let's just say that Newry belongs to Armagh Diocese. What do these dioceses look like?
+
+We're also looking at Kilmore, Elphin and Ardagh, because that's where Sligo CoM is based.
+
+Oh plus we want to look at Meath & Kildare because that's where Kildare CoM is based, but we don't have a shapefile for that CoM yet.
+
+```{r plotDioceses}
+dioceses |> 
+  filter(diocese %in% c("Tuam, Limerick and Killaloe",
+                        "Cork, Cloyne and Ross", 
+                        "Kilmore, Elphin and Ardagh",
+                        "Meath and Kildare")) |> 
+  ggplot() +
+  geom_sf(aes(colour = type, fill = diocese)) + 
+  ca_scale_fill_discrete()
+```
+
+They're all in the ROI, fantastic.
+
+Edit: Looks like Kilmore, Elphin and Ardagh is partly in NI, but I imagine that's the one Elspeth said is 'mostly wilderness'.
+
+Oh what the heck let's reuse code from last time and see where the populations live.
+
+## Join population data
+
+```{r joinPopulationData}
+dioceses <- 
+  select(dioceses, -type) |> 
+  left_join(population, by = c("area_code" = "code")) 
+
+dioceses |> 
+  as.data.frame() |> 
+  select(-sa_geometry) |> 
+  filter(diocese == "Kilmore, Elphin and Ardagh") |> 
+  summarise(population = sum(population), .by = type) |> 
+  mutate(percent = scales::percent(population/sum(population)))
+```
+
+
+Great, only 3% of diocesan popuation live in Northern Ireland. Let's just pretend they don't exist.
+### CoM location
+
+```{r something_else_idk}
+diocesan_areas <- 
+  dioceses |> 
+  filter(diocese %in% c("Kilmore, Elphin and Ardagh")) |> 
+  group_by(type) |> 
+  summarise(sa_geometry = st_union(sa_geometry))
+
+com |> 
+  filter(com_name == "newry") |> 
+  ggplot(fill = ca_gold(), col = "black") +
+  geom_sf() + 
+  geom_sf(data = diocesan_areas, 
+          aes(fill = type), colour = NA,
+          alpha = 0.35)
+```
