@@ -10,3 +10,5 @@ R/*_cache
 .httr-oauth
 .DS_Store
 .quarto
+
+geospatial-data/coi-dioceses-as-small-area-conglomerations.geojson
