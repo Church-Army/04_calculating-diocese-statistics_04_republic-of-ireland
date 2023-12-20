@@ -9,11 +9,13 @@ editor: visual
 
 ```{r libraries}
 #| output: false
+library(conflicted)
 library(here)
 library(fs)
 
 library(sf)
 library(dplyr)
+conflicted::conflicts_prefer(dplyr::filter)
 library(purrr)
 library(stringr)
 library(lobstr)
@@ -33,7 +35,7 @@ stats <- c("age", "ethnicity", "ethnicity-harmonised",
 read_census <- function(stat){
   
   file_name <- 
-    str_c("republic-of-ireland", stat, "sa", "2016", sep = "_") |> 
+    str_c("republic-of-ireland", stat, "sa", "2022", sep = "_") |> 
     str_c(".RDS")
   
   readRDS(here("census-data", file_name))
@@ -52,7 +54,8 @@ tree(stats, max_depth = 1)
 ```{r readDiocesanShapes}
 #| cache: false
 dioceses <-
-  read_sf(here("geospatial-data", "coi-dioceses-as-small-area-conglomerations.geojson"))
+  read_sf(here("geospatial-data",
+               "coi-dioceses-as-small-area-conglomerations.geojson"))
 
 dioceses <- 
   as.data.frame(dioceses) |> 
@@ -65,18 +68,18 @@ dioceses <-
 
 ## Join stats
 
+There should be all `NA`s for the NI data zones, so it's good if that happens.
+
 ```{r joinStats}
 
 stats <-
   map(stats,
       \(stat){
         
-        stat <- 
-          mutate(stat,
-                 area_code = str_remove(sa_2015_code, "SA2017_")) |> 
-                   select(-sa_2015_code)
+        stat <- mutate(stat, area_code = sa_2022_code)
         
         left_join(dioceses, stat, by = "area_code")
+        
       })
 
 stats[[1]] |> 
@@ -129,7 +132,7 @@ summaries <- dir_create(save_dir, "diocesan-totals")
 iwalk(dioceses_tables, 
     \(x, x_name){
       file_name <- 
-        str_c("roi", "dioceses", x_name, "2016", sep = "_") |> 
+        str_c("roi", "dioceses", x_name, "2022", sep = "_") |> 
         str_c(".csv")
       
       vroom_write(x, here(summaries, file_name), delim = ",")
@@ -146,7 +149,7 @@ iwalk(stats,
                 
                 file_name <- 
                   str_c("republic-of-ireland", "dioceses",
-                        stat_name, "sa", "2016", sep = "_") |> 
+                        stat_name, "sa", "2022", sep = "_") |> 
                   str_c(".csv")
                 
                 vroom_write(
